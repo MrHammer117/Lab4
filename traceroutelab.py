@@ -12,28 +12,25 @@ TRIES = 2
 # The packet that we shall send to each router along the path is the ICMP echo
 # request packet, which is exactly what we had used in the ICMP ping exercise.
 # We shall use the same packet that we built in the Ping exercise
-def checksum(string):
-# In this function we make the checksum of our packet
-# hint: see icmpPing lab
-    str_ = bytearray(str_)
+def checksum(packet):
+    # Calculate the checksum of the packet
+    if len(packet) % 2 != 0:
+        packet += b'\x00'  # Padding if packet length is odd
+
+    # Initialize checksum
     csum = 0
-    countTo = (len(str_) // 2) * 2
+    countTo = len(packet)
 
+    # Iterate over the packet, two bytes at a time
     for count in range(0, countTo, 2):
-        thisVal = str_[count+1] * 256 + str_[count]
-        csum = csum + thisVal
-        csum = csum & 0xffffffff
+        thisVal = packet[count + 1] * 256 + packet[count]
+        csum += thisVal
+        csum &= 0xffffffff  # Force to 32 bits
 
-    if countTo < len(str_):
-        csum = csum + str_[-1]
-        csum = csum & 0xffffffff
+    csum = (csum >> 16) + (csum & 0xffff)  # Fold once
+    csum += (csum >> 16)  # Fold again
 
-    csum = (csum >> 16) + (csum & 0xffff)
-    csum = csum + (csum >> 16)
-    answer = ~csum
-    answer = answer & 0xffff
-    answer = answer >> 8 | (answer << 8 & 0xff00)
-    return answer
+    return ~csum & 0xffff  # Invert and truncate to 16 bits
 
 def build_packet():
 # In the sendOnePing() method of the ICMP Ping exercise ,firstly the header of our
@@ -43,7 +40,30 @@ def build_packet():
 # Append checksum to the header.
 # Don’t send the packet yet , just return the final packet in this function.
 # So the function ending should look like this
-    
+
+    # Header is type (8), code (8), checksum (16), id (16), sequence (16)
+    myID = os.getpid() & 0xFFFF
+
+    myChecksum = 0
+
+    # Make a dummy header with a 0 checksum
+    # struct -- Interpret strings as packed binary data
+    header = struct.pack("bbHHh", ICMP_ECHO_REQUEST, 0, myChecksum, myID, 1)
+
+    data = struct.pack("d", time.time())
+    # Concatenate header and data
+    packet = header + data
+
+    # Calculate the checksum on the data and the dummy header.
+    myChecksum = checksum(packet)
+
+    # Get the right checksum, and put in the header
+    if sys.platform == 'win32' or sys.platform == 'darwin':
+        # Convert 16-bit integers from host to network byte order
+        myChecksum = htons(myChecksum) & 0xffff
+    else:
+        myChecksum = htons(myChecksum)
+        
     packet = header + data
     return packet
 
@@ -54,6 +74,7 @@ def get_route(hostname):
             destAddr = gethostbyname(hostname)
             #Fill in start
             # Make a raw socket named mySocket
+            mySocket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)
             #Fill in end
             mySocket.setsockopt(IPPROTO_IP, IP_TTL, struct.pack('I', ttl))
             mySocket.settimeout(TIMEOUT)
@@ -70,12 +91,13 @@ def get_route(hostname):
                 timeReceived = time.time()
                 timeLeft = timeLeft - howLongInSelect
                 if timeLeft <= 0:
-                    print(" * * * Request timed out.")
+                    print(" *      *      * Request timed out.")
             except timeout:
                 continue
             else:
                 #Fill in start
                 #Fetch the icmp type from the IP packet
+                types = struct.unpack('B', recvPacket[20:21])[0]
                 #Fill in end
                 if types == 11:
                     bytes = struct.calcsize("d")
