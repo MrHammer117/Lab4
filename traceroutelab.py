@@ -69,23 +69,20 @@ def build_packet():
 
 def get_route(hostname):
     timeLeft = TIMEOUT
-    for ttl in range(1,MAX_HOPS):
+    destAddr = gethostbyname(hostname)
+    for ttl in range(1, MAX_HOPS):
         for tries in range(TRIES):
-            destAddr = gethostbyname(hostname)
-            #Fill in start
-            # Make a raw socket named mySocket
             mySocket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)
-            #Fill in end
             mySocket.setsockopt(IPPROTO_IP, IP_TTL, struct.pack('I', ttl))
             mySocket.settimeout(TIMEOUT)
             try:
                 d = build_packet()
                 mySocket.sendto(d, (hostname, 0))
-                t= time.time()
+                t = time.time()
                 startedSelect = time.time()
                 whatReady = select.select([mySocket], [], [], timeLeft)
                 howLongInSelect = (time.time() - startedSelect)
-                if whatReady[0] == []: # Timeout
+                if whatReady[0] == []:  # Timeout
                     print(" *      *      * Request timed out.")
                 recvPacket, addr = mySocket.recvfrom(1024)
                 timeReceived = time.time()
@@ -95,26 +92,37 @@ def get_route(hostname):
             except timeout:
                 continue
             else:
-                #Fill in start
-                #Fetch the icmp type from the IP packet
                 types = struct.unpack('B', recvPacket[20:21])[0]
-                #Fill in end
-                if types == 11:
-                    bytes = struct.calcsize("d")
-                    timeSent = struct.unpack("d", recvPacket[28:28 + bytes])[0]
-                    print(" %d rtt=%.0f ms %s" %(ttl, (timeReceived -t)*1000, addr[0]))
-                elif types == 3:
-                    bytes = struct.calcsize("d")
-                    timeSent = struct.unpack("d", recvPacket[28:28 + bytes])[0]
-                    print(" %d rtt=%.0f ms %s" %(ttl,(timeReceived-t)*1000, addr[0]))
-                elif types == 0:
-                    bytes = struct.calcsize("d")
-                    timeSent = struct.unpack("d", recvPacket[28:28 + bytes])[0]
-                    print(" %d rtt=%.0f ms %s" %(ttl, (timeReceived - timeSent)*1000, addr[0]))
-                    return
-                else:
-                    print("error")
+                try:
+                    if types == 11:
+                        bytes = struct.calcsize("d")
+                        timeSent = struct.unpack("d", recvPacket[28:28 + bytes])[0]
+                        domain_name = gethostbyaddr(addr[0])[0]
+                        print(" %d rtt=%.0f ms IP: %s Domain Name: %s" % (ttl, (timeReceived - t) * 1000, addr[0], domain_name))
+                    elif types == 0 and addr[0] == destAddr:
+                        bytes = struct.calcsize("d")
+                        timeSent = struct.unpack("d", recvPacket[28:28 + bytes])[0]
+                        domain_name = gethostbyaddr(addr[0])[0]
+                        print(" %d rtt=%.0f ms IP: %s Domain Name: %s" % (ttl, (timeReceived - timeSent) * 1000, addr[0], domain_name))
+                        if addr[0] == destAddr:
+                            print("Destination reached:", hostname)
+                            return
+                    elif types == 0:
+                        bytes = struct.calcsize("d")
+                        timeSent = struct.unpack("d", recvPacket[28:28 + bytes])[0]
+                        domain_name = gethostbyaddr(addr[0])[0]
+                        print(" %d rtt=%.0f ms IP: %s Domain Name: %s" % (ttl, (timeReceived - timeSent) * 1000, addr[0], domain_name))
+                    elif types == 3:
+                        bytes = struct.calcsize("d")
+                        timeSent = struct.unpack("d", recvPacket[28:28 + bytes])[0]
+                        domain_name = gethostbyaddr(addr[0])[0]
+                        print(" %d rtt=%.0f ms IP: %s Domain Name: %s" % (ttl, (timeReceived - t) * 1000, addr[0], domain_name))
+                    else:
+                        print("error")
+                except (herror, gaierror) as e:
+                    print("Unable to resolve hostname for IP: %s" % addr[0])
                 break
             finally:
                 mySocket.close()
+
 get_route("google.com")
