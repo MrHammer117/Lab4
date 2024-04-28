@@ -16,16 +16,17 @@ ID = os.getpid() & 0xffff
 # request packet, which is exactly what we had used in the ICMP ping exercise.
 # We shall use the same packet that we built in the Ping exercise
 def checksum(string):
+    
     csum = 0
     countTo = (len(string) // 2) * 2
     count = 0
     while count < countTo:
-        thisVal = ord(string[count+1]) * 256 + ord(string[count])
+        thisVal = string[count+1] * 256 + string[count]
         csum = csum + thisVal
         csum = csum & 0xffffffff
         count = count + 2
     if countTo < len(string):
-        csum = csum + ord(string[len(string) - 1])
+        csum = csum + string[len(string) - 1]
         csum = csum & 0xffffffff
     csum = (csum >> 16) + (csum & 0xffff)
     csum = csum + (csum >> 16)
@@ -50,12 +51,12 @@ def build_packet():
 
     # Make a dummy header with a 0 checksum
     # struct -- Interpret strings as packed binary data
-    header = struct.pack("bbHHh", ICMP_ECHO_REQUEST, 0, myChecksum, ID, 1)
+    header = struct.pack("BBHHH", ICMP_ECHO_REQUEST, 0, myChecksum, ID, 1)
 
     data = struct.pack("d", time.time())
 
     # Calculate the checksum on the data and the dummy header.
-    myChecksum = checksum(str(header) + str(data))
+    myChecksum = checksum(header + data)
 
     # Get the right checksum, and put in the header
     if sys.platform == 'darwin':
@@ -64,6 +65,7 @@ def build_packet():
     else:
         myChecksum = htons(myChecksum)
         
+    header = struct.pack("bbHHh", ICMP_ECHO_REQUEST, 0, myChecksum, ID, 1)
     packet = header + data
     return packet
 
@@ -82,18 +84,19 @@ def get_route(hostname):
             mySocket.setsockopt(IPPROTO_IP, IP_TTL, struct.pack('I', ttl)) 
             try:
                 d = build_packet()
-                mySocket.sendto(d, (hostname, 0))
+                mySocket.sendto(d, (destAddr, 0))
                 t = time.time()
                 startedSelect = time.time()
                 whatReady = select.select([mySocket], [], [], timeLeft)
                 howLongInSelect = (time.time() - startedSelect)
                 if whatReady[0] == []:  # Timeout
-                    print(ttl," *      *      * Request timed out.")
+                    print(" *      *      * Request timed out: Socket not ready.")
                 recvPacket, addr = mySocket.recvfrom(1024)
                 timeReceived = time.time()
                 timeLeft = timeLeft - howLongInSelect
-                if timeLeft <= 0:
-                    print(ttl," *      *      * Request timed out.")
+                if timeLeft <= 0.0:
+                    print(" *      *      * Request timed out: No time left.")
+                    timeLeft = 0.0
             except timeout:
                 continue
             else:
@@ -104,6 +107,14 @@ def get_route(hostname):
                         timeSent = struct.unpack("d", recvPacket[28:28 + bytes])[0]
                         domain_name = gethostbyaddr(addr[0])[0]
                         print(" %d rtt=%.0f ms IP: %s Domain Name: %s" % (ttl, (timeReceived - t) * 1000, addr[0], domain_name))
+                    elif types == 0 and addr[0] == destAddr:
+                        bytes = struct.calcsize("d")
+                        timeSent = struct.unpack("d", recvPacket[28:28 + bytes])[0]
+                        domain_name = gethostbyaddr(addr[0])[0]
+                        print(" %d rtt=%.0f ms IP: %s Domain Name: %s" % (ttl, (timeReceived - timeSent) * 1000, addr[0], domain_name))
+                        if addr[0] == destAddr:
+                            print("Destination reached:", hostname)
+                            return
                     elif types == 0: # Echo Reply
                         bytes = struct.calcsize("d")
                         timeSent = struct.unpack("d", recvPacket[28:28 + bytes])[0]
@@ -134,4 +145,4 @@ def get_route(hostname):
             finally:
                 mySocket.close()
 
-get_route("www.google.com")
+get_route("google.com")
